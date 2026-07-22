@@ -937,10 +937,14 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[register] %s pid=%d code=%s", acct.Username, acct.PID, acct.FriendCode)
 	token := signToken(acct.ID, sess.ID)
 	setTokenCookie(w, token)
+	// L'e-mail de confirmation a été envoyé : le prévenir évite qu'il essaie de jouer
+	// en ligne et tombe sur l'erreur 2124-3121 ou « e-mail non vérifié » sans comprendre.
+	needsVerification := !acct.EmailVerified && !acct.IsGuest()
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"token":     token,
-		"nex_token": signNexToken(acct.PID, acct.Username),
-		"account":   acct.Public(),
+		"token":             token,
+		"nex_token":         signNexToken(acct.PID, acct.Username),
+		"account":           acct.Public(),
+		"needs_verification": needsVerification,
 	})
 }
 
@@ -1284,6 +1288,26 @@ func (s *server) evalOnlineGatesWithSelf(pid uint64, kind, ip string) (string, b
 	return reason, allow
 }
 
+// gateMessage maps an evalOnlineGates reason to a user-facing message (French,
+// matching the site/emulator locale). The emulator shows this in its UI instead
+// of letting the Switch display a cryptic error code like 2124-3121.
+func gateMessage(reason string) string {
+	switch reason {
+	case "unknown":
+		return "Ce compte Nextendo n'existe pas. Vérifie ton identifiant de connexion."
+	case "disabled":
+		return "Ce compte est désactivé. Contacte l'équipe Nextendo pour plus d'informations."
+	case "unverified":
+		return "Ton adresse e-mail n'a pas encore été confirmée. Vérifie ta boîte de réception (y compris les spams) et clique sur le lien de confirmation. Tu peux aussi demander un nouveau lien depuis la page Connexion du site Nextendo."
+	case "discord_unlinked":
+		return "Ton compte Nextendo doit être lié au serveur Discord pour jouer en ligne. Rejoins le Discord Nextendo et lie ton compte depuis ton profil."
+	case "elsewhere":
+		return "Tu joues déjà sur un autre appareil (Switch ou Ryujinx). Ferme la session en cours pour pouvoir te connecter ici."
+	default:
+		return ""
+	}
+}
+
 func (s *server) onlineStatus(w http.ResponseWriter, r *http.Request) {
 	acct, ok := s.accountFromBearer(r)
 	if !ok {
@@ -1296,7 +1320,7 @@ func (s *server) onlineStatus(w http.ResponseWriter, r *http.Request) {
 		kind = se.Kind
 	}
 	reason, allow := s.evalOnlineGatesWithSelf(acct.PID, kind, clientIP(r))
-	writeJSON(w, http.StatusOK, map[string]any{"allow": allow, "reason": reason})
+	writeJSON(w, http.StatusOK, map[string]any{"allow": allow, "reason": reason, "message": gateMessage(reason)})
 }
 
 func (s *server) onlineCheck(w http.ResponseWriter, r *http.Request) {
