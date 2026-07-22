@@ -937,14 +937,10 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[register] %s pid=%d code=%s", acct.Username, acct.PID, acct.FriendCode)
 	token := signToken(acct.ID, sess.ID)
 	setTokenCookie(w, token)
-	// L'e-mail de confirmation a été envoyé : le prévenir évite qu'il essaie de jouer
-	// en ligne et tombe sur l'erreur 2124-3121 ou « e-mail non vérifié » sans comprendre.
-	needsVerification := !acct.EmailVerified && !acct.IsGuest()
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"token":             token,
-		"nex_token":         signNexToken(acct.PID, acct.Username),
-		"account":           acct.Public(),
-		"needs_verification": needsVerification,
+		"token":     token,
+		"nex_token": signNexToken(acct.PID, acct.Username),
+		"account":   acct.Public(),
 	})
 }
 
