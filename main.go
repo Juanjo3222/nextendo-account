@@ -209,6 +209,7 @@ type Store interface {
 	SetDisabled(id int64, disabled bool) error                            // gel de relance : ferme/rouvre un compte
 	SetRegIP(id int64, ip string) error                                   // ban : capture l'IP d'inscription (réservée au ban)
 	SetDiscordLink(id int64, discordID, username string) error            // lien Discord poussé par le bot (gate online + ban miroir)
+	PersistNintendoIDs(id int64) error                                    // persiste NaID/BaasID/BsDid derives (fix 2124-3121)
 	LockdownExcept(keepPID uint64) (int, error)                           // ferme TOUS les comptes sauf keepPID (et le vérifie/rouvre)
 	EnableAll() (int, error)                                              // annule le gel : rouvre tous les comptes
 	AllAccounts() []*Account                                              // espace admin : liste tous les comptes
@@ -458,6 +459,19 @@ func (s *jsonStore) SetEmail(id int64, email string) (*Account, error) {
 		return nil, err
 	}
 	return a, nil
+}
+
+func (s *jsonStore) PersistNintendoIDs(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.Accts[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if !a.ensureNintendoIDs() {
+		return nil // already filled, no change
+	}
+	return s.persist()
 }
 
 func addFriendPID(a *Account, pid uint64) {
@@ -2147,6 +2161,7 @@ func (s *server) internalResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	acct.ensureNintendoIDs()
+	s.store.PersistNintendoIDs(acct.ID)
 	avatar := resolveAvatar(acct.Profile)
 	log.Printf("[resolve] %s -> pid=%d %q", r.URL.RawQuery, acct.PID, acct.Username)
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -2578,7 +2593,8 @@ func (s *server) internalIdentity(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "compte introuvable")
 		return
 	}
-	acct.ensureNintendoIDs() // deterministic; fills in-memory for pre-existing accounts
+	acct.ensureNintendoIDs()
+	s.store.PersistNintendoIDs(acct.ID)
 	nickname := displayName(acct)
 	// pseudo affiché = Profile.Name (pseudo synchronisé depuis la console) sinon Username.
 	// avatar = image uploadée OU icône de galerie choisie (résolue depuis avatarsDir).
@@ -2652,6 +2668,7 @@ func (s *server) internalLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	acct.ensureNintendoIDs()
+	s.store.PersistNintendoIDs(acct.ID)
 	nickname := displayName(acct)
 	// pseudo affiché = Profile.Name (synchronisé depuis la console) sinon Username.
 	// avatar = image uploadée OU icône de galerie choisie (résolue depuis avatarsDir).
